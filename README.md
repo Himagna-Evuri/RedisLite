@@ -49,7 +49,7 @@ The `TTL` command follows Redis-style return values:
 
 ## Architecture
 
-RedisLite follows a layered architecture where each component has a specific responsibility.
+RedisLite follows a layered architecture:
 
 ```text
 User
@@ -96,7 +96,7 @@ Handles commands such as `SET`, `GET`, `DEL`, `TTL`, `KEYS`, and `FLUSHDB` and c
 
 Contains the core database logic.
 
-It manages key-value pairs using a thread-safe `ConcurrentHashMap` and handles operations such as storing, retrieving, deleting, checking, and clearing keys.
+It manages key-value pairs using a thread-safe `ConcurrentHashMap` and handles storing, retrieving, deleting, checking, and clearing keys.
 
 It also contains the logic for checking expired keys and running the background expiry thread.
 
@@ -129,13 +129,8 @@ The timestamp is stored along with the value in the `Entry` object.
 
 RedisLite uses two mechanisms to handle expired keys:
 
-1. **Lazy expiration**
-
-   When operations such as `GET`, `EXISTS`, `TTL`, `KEYS`, or `size()` access a key, RedisLite checks whether its expiration time has been reached.
-
-2. **Active expiration**
-
-   A background thread periodically scans the store and removes expired entries.
+1. **Lazy expiration** — expired keys are detected when they are accessed.
+2. **Active expiration** — a background thread periodically scans and removes expired entries.
 
 ```text
 SET session abc 10
@@ -156,7 +151,7 @@ Check periodically
 Remove expired key
 ```
 
-This combination ensures that expired keys can be removed both when they are accessed and through background cleanup.
+This combination prevents expired keys from remaining in memory indefinitely.
 
 ## Persistence
 
@@ -267,17 +262,6 @@ RedisLite/
 └── README.md
 ```
 
-### Package Responsibilities
-
-| Package | Responsibility |
-|---|---|
-| `model` | Data model for stored entries |
-| `parser` | Command parsing and command handling |
-| `storage` | Core in-memory key-value store |
-| `persistence` | Saving and loading database data |
-| `ttl` | TTL-related components |
-| `test` | Automated unit tests |
-
 ## How to Run
 
 ### Prerequisites
@@ -296,13 +280,11 @@ RedisLite/
 
 ### Build and Test
 
-Run the Maven test lifecycle:
+Run:
 
 ```bash
 mvn clean test
 ```
-
-The project includes automated JUnit 5 tests covering the core functionality.
 
 Expected result:
 
@@ -374,12 +356,6 @@ Current test result:
 0 errors
 ```
 
-The project also passes the Maven build successfully:
-
-```text
-BUILD SUCCESS
-```
-
 ## Design Decisions
 
 ### `ConcurrentHashMap`
@@ -390,7 +366,7 @@ A `ConcurrentHashMap` is used for in-memory storage because RedisLite has a back
 
 Instead of storing the remaining TTL, RedisLite stores an absolute expiration timestamp.
 
-This makes expiration checks simple:
+Expiration can be checked using:
 
 ```text
 currentTime >= expiryTime
@@ -403,13 +379,11 @@ RedisLite combines:
 - **Lazy expiration** — expired keys are detected when accessed.
 - **Active expiration** — a background thread periodically removes expired keys.
 
-This prevents expired entries from remaining in memory indefinitely.
-
 ### Separate Persistence Layer
 
 Persistence logic is isolated inside `PersistenceManager` rather than being embedded entirely within `KeyValueStore`.
 
-This follows the Single Responsibility Principle and makes the storage and persistence logic easier to maintain independently.
+This keeps storage and persistence responsibilities separated.
 
 ### Temporary File Replacement
 
@@ -432,7 +406,7 @@ Potential improvements include:
 - Move the expiry-cleaning logic completely into the `ExpiryCleaner` class
 - Improve persistence performance by avoiding a full database rewrite after every modification
 - Add more Redis-compatible commands such as `INCR`, `DECR`, `APPEND`, and `MGET`
-- Add support for more data structures such as Lists, Sets, and Hashes
+- Add support for Lists, Sets, and Hashes
 - Implement a client-server architecture using TCP sockets
 - Add connection handling for multiple clients
 - Improve concurrency control for persistence operations
