@@ -1,0 +1,14 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Maven
+target/
+
+# Runtime database
+dump.rdb
+dump.rdb.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
