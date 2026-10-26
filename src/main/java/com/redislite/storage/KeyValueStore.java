@@ -16,34 +16,45 @@ public class KeyValueStore {
     private final Object storeLock = new Object();
     private final PersistenceManager persistenceManager;
 
+
     public KeyValueStore() {
-        persistenceManager = new PersistenceManager(storeLock);
-        initialize();
+        this(PersistenceManager::new, true);
     }
+
     public KeyValueStore(
             java.util.function.Function<Object, PersistenceManager>
                     persistenceManagerFactory) {
+        this(persistenceManagerFactory, true);
+    }
+
+    public KeyValueStore(
+            java.util.function.Function<Object, PersistenceManager>
+                    persistenceManagerFactory,
+            boolean startCleaner) {
 
         this.persistenceManager =
                 persistenceManagerFactory.apply(storeLock);
 
-        initialize();
+        initialize(startCleaner);
     }
-    private void initialize() {
 
+
+    private void initialize(boolean startCleaner) {
         persistenceManager.createDatabaseFile();
         persistenceManager.loadFromDisk(store);
 
-        Thread cleanerThread =
-                new Thread(
-                        new ExpiryCleaner(
-                                store,
-                                persistenceManager,
-                                storeLock));
+        if (startCleaner) {
+            Thread cleanerThread = new Thread(
+                    new ExpiryCleaner(
+                            store,
+                            persistenceManager,
+                            storeLock));
 
-        cleanerThread.setDaemon(true);
-        cleanerThread.start();
+            cleanerThread.setDaemon(true);
+            cleanerThread.start();
+        }
     }
+
     private Entry getValidEntry(String key) {
 
         while (true) {
@@ -75,15 +86,19 @@ public class KeyValueStore {
                     continue;
                 }
 
+
                 boolean removed = store.remove(key, entry);
 
                 if (removed) {
                     if (!persistenceManager.saveToDisk(store)) {
-                        store.putIfAbsent(key, entry);
+                        System.out.println(
+                                "Warning: Failed to persist expired-key removal for: "
+                                        + key);
                     }
 
                     return null;
                 }
+
             }
 
             // Another thread changed the entry.

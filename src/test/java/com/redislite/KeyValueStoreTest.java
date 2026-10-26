@@ -296,6 +296,37 @@ public class KeyValueStoreTest {
                 store.get("delete-test"));
     }
 
+
+
+    @Test
+    void expiredKeyShouldStayRemovedWhenPersistenceFails() {
+        TogglePersistenceManager[] manager =
+                new TogglePersistenceManager[1];
+
+        KeyValueStore store = new KeyValueStore(
+                lock -> {
+                    manager[0] = new TogglePersistenceManager(lock);
+                    return manager[0];
+                },
+                false
+        );
+
+        store.set("expired-test", "OldValue", 1);
+
+        manager[0].setFailSaves(true);
+
+        try {
+            Thread.sleep(1100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+
+        Assertions.assertNull(store.get("expired-test"));
+        Assertions.assertFalse(store.exists("expired-test"));
+    }
+
+
     @Test
     void clearShouldRestoreAllKeysWhenPersistenceFails() {
 
