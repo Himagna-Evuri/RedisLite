@@ -41,7 +41,11 @@ public class ExpiryCleaner implements Runnable {
                         "Expired key removed: "
                                 + current.getKey());
 
-                iterator.remove();
+                boolean removed = store.remove(current.getKey(), entry);
+
+                if (removed) {
+                    removedAny = true;
+                }
 
                 removedAny = true;
             }
