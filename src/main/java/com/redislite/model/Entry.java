@@ -2,8 +2,8 @@ package com.redislite.model;
 
 public class Entry {
 
-    private String value;
-    private Long expiryTime;
+    private final String value;
+    private final Long expiryTime;
 
     public Entry(String value, Long expiryTime) {
         this.value = value;
@@ -18,11 +18,5 @@ public class Entry {
         return expiryTime;
     }
 
-    public void setValue(String value) {
-        this.value = value;
-    }
 
-    public void setExpiryTime(Long expiryTime) {
-        this.expiryTime = expiryTime;
-    }
 }
