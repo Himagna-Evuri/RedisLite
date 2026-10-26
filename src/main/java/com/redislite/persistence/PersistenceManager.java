@@ -36,35 +36,33 @@ public class PersistenceManager {
             }
         }
     }
-    public void saveToDisk(Map<String, Entry> store) {
+
+    public boolean saveToDisk(Map<String, Entry> store) {
 
         Map<String, Entry> snapshot;
 
         synchronized (storeLock) {
             snapshot = new java.util.HashMap<>(store);
         }
+
         String tempFileName = FILE_NAME + ".tmp";
 
-
-        try (FileWriter writer =
-                     new FileWriter(tempFileName)) {
+        try (FileWriter writer = new FileWriter(tempFileName)) {
 
             for (Map.Entry<String, Entry> entry : snapshot.entrySet()) {
 
                 Entry storedEntry = entry.getValue();
 
-                String key =
-                        entry.getKey().replace("\\", "\\\\")
-                                .replace(",", "\\,");
+                String key = entry.getKey()
+                        .replace("\\", "\\\\")
+                        .replace(",", "\\,");
 
-                String value =
-                        storedEntry.getValue().replace("\\", "\\\\")
-                                .replace(",", "\\,");
+                String value = storedEntry.getValue()
+                        .replace("\\", "\\\\")
+                        .replace(",", "\\,");
 
-                String line =
-                        key + "," +
-                                value + "," +
-                                storedEntry.getExpiryTime();
+                String line = key + "," + value + ","
+                        + storedEntry.getExpiryTime();
 
                 writer.write(line);
                 writer.write(System.lineSeparator());
@@ -72,7 +70,7 @@ public class PersistenceManager {
 
         } catch (IOException e) {
             e.printStackTrace();
-            return;
+            return false;
         }
 
         try {
@@ -87,8 +85,12 @@ public class PersistenceManager {
 
         } catch (IOException e) {
             e.printStackTrace();
+            return false;
         }
+
+        return true;
     }
+
     public void loadFromDisk(Map<String, Entry> store) {
 
         try (BufferedReader br =
