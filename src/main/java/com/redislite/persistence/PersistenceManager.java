@@ -36,7 +36,7 @@ public class PersistenceManager {
             }
         }
     }
-    public synchronized void saveToDisk(Map<String, Entry> store) {
+    public void saveToDisk(Map<String, Entry> store) {
 
         Map<String, Entry> snapshot;
 
