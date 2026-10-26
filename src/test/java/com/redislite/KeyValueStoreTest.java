@@ -3,6 +3,7 @@ package com.redislite;
 import com.redislite.storage.KeyValueStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assertions;
+import java.util.concurrent.CountDownLatch;
 
 public class KeyValueStoreTest {
 
@@ -116,4 +117,56 @@ public class KeyValueStoreTest {
 
         store2.clear();
     }
+
+    @Test
+    void concurrentAccessShouldCompleteSuccessfully()
+            throws InterruptedException {
+
+        KeyValueStore store = new KeyValueStore();
+        store.clear();
+
+        int threadCount = 2;
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch doneSignal = new CountDownLatch(threadCount);
+
+        Thread writer = new Thread(() -> {
+            try {
+                startSignal.await();
+
+                for (int i = 0; i < 100; i++) {
+                    store.set("shared", "value" + i);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                doneSignal.countDown();
+            }
+        });
+
+        Thread reader = new Thread(() -> {
+            try {
+                startSignal.await();
+
+                for (int i = 0; i < 100; i++) {
+                    store.get("shared");
+                    store.exists("shared");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                doneSignal.countDown();
+            }
+        });
+
+        writer.start();
+        reader.start();
+
+        startSignal.countDown();
+        doneSignal.await();
+
+        Assertions.assertEquals("value99", store.get("shared"));
+
+        store.clear();
+    }
+
 }

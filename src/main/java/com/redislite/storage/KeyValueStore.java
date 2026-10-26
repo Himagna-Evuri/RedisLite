@@ -29,28 +29,36 @@ public class KeyValueStore {
         cleanerThread.setDaemon(true);
         cleanerThread.start();
     }
+
     private Entry getValidEntry(String key) {
 
-        Entry entry = store.get(key);
+        while (true) {
 
-        if (entry == null) {
-            return null;
+            Entry entry = store.get(key);
+
+            if (entry == null) {
+                return null;
+            }
+
+            Long expiryTime = entry.getExpiryTime();
+
+            if (expiryTime == null ||
+                    System.currentTimeMillis() < expiryTime) {
+                return entry;
+            }
+
+            // Remove only if the key still maps to this entry.
+            boolean removed = store.remove(key, entry);
+
+            if (removed) {
+                return null;
+            }
+
+            // Another thread changed the entry.
+            // Loop again and check the latest value.
         }
-
-        Long expiryTime =
-                entry.getExpiryTime();
-
-        if (expiryTime != null &&
-                System.currentTimeMillis()
-                        >= expiryTime) {
-
-            store.remove(key);
-
-            return null;
-        }
-
-        return entry;
     }
+
 
     public void set(String key,
                     String value,
