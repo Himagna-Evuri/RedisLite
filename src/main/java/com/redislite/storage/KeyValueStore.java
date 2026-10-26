@@ -7,16 +7,29 @@ import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
+
 import com.redislite.ttl.ExpiryCleaner;
 
 public class KeyValueStore {
 
     private final Map<String, Entry> store = new ConcurrentHashMap<>();
     private final Object storeLock = new Object();
-    private final PersistenceManager persistenceManager =
-            new PersistenceManager(storeLock);
+    private final PersistenceManager persistenceManager;
 
     public KeyValueStore() {
+        persistenceManager = new PersistenceManager(storeLock);
+        initialize();
+    }
+    public KeyValueStore(
+            java.util.function.Function<Object, PersistenceManager>
+                    persistenceManagerFactory) {
+
+        this.persistenceManager =
+                persistenceManagerFactory.apply(storeLock);
+
+        initialize();
+    }
+    private void initialize() {
 
         persistenceManager.createDatabaseFile();
         persistenceManager.loadFromDisk(store);
@@ -31,7 +44,6 @@ public class KeyValueStore {
         cleanerThread.setDaemon(true);
         cleanerThread.start();
     }
-
     private Entry getValidEntry(String key) {
 
         while (true) {
@@ -66,7 +78,10 @@ public class KeyValueStore {
                 boolean removed = store.remove(key, entry);
 
                 if (removed) {
-                    persistenceManager.saveToDisk(store);
+                    if (!persistenceManager.saveToDisk(store)) {
+                        store.putIfAbsent(key, entry);
+                    }
+
                     return null;
                 }
             }
@@ -94,8 +109,18 @@ public class KeyValueStore {
                 new Entry(value, expiryTime);
 
         synchronized (storeLock) {
-            store.put(key, entry);
-            persistenceManager.saveToDisk(store);
+            Entry previousEntry = store.put(key, entry);
+
+            if (!persistenceManager.saveToDisk(store)) {
+                if (previousEntry == null) {
+                    store.remove(key, entry);
+                } else {
+                    store.replace(key, entry, previousEntry);
+                }
+
+                throw new IllegalStateException(
+                        "Failed to persist data to disk.");
+            }
         }
     }
 
@@ -106,8 +131,18 @@ public class KeyValueStore {
                 new Entry(value, null);
 
         synchronized (storeLock) {
-            store.put(key, entry);
-            persistenceManager.saveToDisk(store);
+            Entry previousEntry = store.put(key, entry);
+
+            if (!persistenceManager.saveToDisk(store)) {
+                if (previousEntry == null) {
+                    store.remove(key, entry);
+                } else {
+                    store.replace(key, entry, previousEntry);
+                }
+
+                throw new IllegalStateException(
+                        "Failed to persist data to disk.");
+            }
         }
     }
 
@@ -122,23 +157,33 @@ public class KeyValueStore {
 
         return entry.getValue();
     }
+
     public boolean delete(String key) {
 
         synchronized (storeLock) {
             Entry removed = store.remove(key);
 
-            if (removed != null) {
-                persistenceManager.saveToDisk(store);
+            if (removed == null) {
+                return false;
             }
 
-            return removed != null;
+            if (!persistenceManager.saveToDisk(store)) {
+                store.put(key, removed);
+
+                throw new IllegalStateException(
+                        "Failed to persist data to disk.");
+            }
+
+            return true;
         }
     }
+
     public boolean exists(String key) {
 
         return getValidEntry(key)
                 != null;
     }
+
     public long ttl(String key) {
 
         Entry entry = getValidEntry(key);
@@ -158,6 +203,7 @@ public class KeyValueStore {
 
         return remaining;
     }
+
     public Set<String> keys() {
 
         Set<String> keys = new HashSet<>();
@@ -171,13 +217,24 @@ public class KeyValueStore {
 
         return keys;
     }
+
     public void clear() {
 
         synchronized (storeLock) {
+            Map<String, Entry> previousStore =
+                    new java.util.HashMap<>(store);
+
             store.clear();
-            persistenceManager.saveToDisk(store);
+
+            if (!persistenceManager.saveToDisk(store)) {
+                store.putAll(previousStore);
+
+                throw new IllegalStateException(
+                        "Failed to persist data to disk.");
+            }
         }
     }
+
     public int size() {
 
         int count = 0;

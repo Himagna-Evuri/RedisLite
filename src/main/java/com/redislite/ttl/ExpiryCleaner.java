@@ -21,7 +21,7 @@ public class ExpiryCleaner implements Runnable {
         this.persistenceManager = persistenceManager;
         this.storeLock = storeLock;
     }
-    private void removeExpiredKeys() {
+    void removeExpiredKeys() {
 
         synchronized (storeLock) {
 
@@ -53,7 +53,11 @@ public class ExpiryCleaner implements Runnable {
             }
 
             if (removedAny) {
-                persistenceManager.saveToDisk(store);
+                if (!persistenceManager.saveToDisk(store)) {
+                    System.out.println(
+                            "Warning: Failed to persist expired-key cleanup. "
+                                    + "Expired keys remain removed from memory.");
+                }
             }
         }
     }

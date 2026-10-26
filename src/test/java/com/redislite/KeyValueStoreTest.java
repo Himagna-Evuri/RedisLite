@@ -6,6 +6,9 @@ import org.junit.jupiter.api.Assertions;
 import java.util.concurrent.CountDownLatch;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import com.redislite.model.Entry;
+import com.redislite.persistence.PersistenceManager;
 
 public class KeyValueStoreTest {
 
@@ -233,5 +236,123 @@ public class KeyValueStoreTest {
         }
 
         recoveredStore.clear();
+    }
+    @Test
+    void setShouldRollbackWhenPersistenceFails() {
+
+        KeyValueStore store = new KeyValueStore(
+                FailingPersistenceManager::new);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.set("name", "Himagna"));
+
+        Assertions.assertNull(store.get("name"));
+    }
+    @Test
+    void setShouldRestorePreviousValueWhenPersistenceFails() {
+
+        TogglePersistenceManager[] manager =
+                new TogglePersistenceManager[1];
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock);
+            return manager[0];
+        });
+
+        store.set("rollback-test", "Original");
+
+        manager[0].setFailSaves(true);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.set("rollback-test", "Updated"));
+
+        Assertions.assertEquals(
+                "Original",
+                store.get("rollback-test"));
+    }
+    @Test
+    void deleteShouldRestoreKeyWhenPersistenceFails() {
+
+        TogglePersistenceManager[] manager =
+                new TogglePersistenceManager[1];
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock);
+            return manager[0];
+        });
+
+        store.set("delete-test", "Original");
+
+        manager[0].setFailSaves(true);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.delete("delete-test"));
+
+        Assertions.assertEquals(
+                "Original",
+                store.get("delete-test"));
+    }
+
+    @Test
+    void clearShouldRestoreAllKeysWhenPersistenceFails() {
+
+        TogglePersistenceManager[] manager =
+                new TogglePersistenceManager[1];
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock);
+            return manager[0];
+        });
+
+        store.set("name", "Himagna");
+        store.set("city", "Hyderabad");
+
+        manager[0].setFailSaves(true);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                store::clear);
+
+        Assertions.assertEquals(2, store.size());
+        Assertions.assertEquals("Himagna", store.get("name"));
+        Assertions.assertEquals("Hyderabad", store.get("city"));
+    }
+
+    private static class FailingPersistenceManager
+            extends PersistenceManager {
+
+        public FailingPersistenceManager(Object storeLock) {
+            super(storeLock);
+        }
+
+        @Override
+        public boolean saveToDisk(Map<String, Entry> store) {
+            return false;
+        }
+    }
+    private static class TogglePersistenceManager
+            extends PersistenceManager {
+
+        private boolean failSaves;
+
+        public TogglePersistenceManager(Object storeLock) {
+            super(storeLock);
+        }
+
+        public void setFailSaves(boolean failSaves) {
+            this.failSaves = failSaves;
+        }
+
+        @Override
+        public boolean saveToDisk(Map<String, Entry> store) {
+            if (failSaves) {
+                return false;
+            }
+
+            return super.saveToDisk(store);
+        }
     }
 }
