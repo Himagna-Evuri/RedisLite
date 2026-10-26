@@ -12,8 +12,9 @@ import com.redislite.ttl.ExpiryCleaner;
 public class KeyValueStore {
 
     private final Map<String, Entry> store = new ConcurrentHashMap<>();
+    private final Object storeLock = new Object();
     private final PersistenceManager persistenceManager =
-            new PersistenceManager();
+            new PersistenceManager(storeLock);
 
     public KeyValueStore() {
 
@@ -24,7 +25,8 @@ public class KeyValueStore {
                 new Thread(
                         new ExpiryCleaner(
                                 store,
-                                persistenceManager));
+                                persistenceManager,
+                                storeLock));
 
         cleanerThread.setDaemon(true);
         cleanerThread.start();
@@ -48,10 +50,25 @@ public class KeyValueStore {
             }
 
             // Remove only if the key still maps to this entry.
-            boolean removed = store.remove(key, entry);
+            synchronized (storeLock) {
 
-            if (removed) {
-                return null;
+                // Check again because another thread may have changed the entry.
+                Entry currentEntry = store.get(key);
+
+                if (currentEntry == null) {
+                    return null;
+                }
+
+                if (currentEntry != entry) {
+                    continue;
+                }
+
+                boolean removed = store.remove(key, entry);
+
+                if (removed) {
+                    persistenceManager.saveToDisk(store);
+                    return null;
+                }
             }
 
             // Another thread changed the entry.
@@ -76,8 +93,10 @@ public class KeyValueStore {
         Entry entry =
                 new Entry(value, expiryTime);
 
-        store.put(key, entry);
-        persistenceManager.saveToDisk(store);
+        synchronized (storeLock) {
+            store.put(key, entry);
+            persistenceManager.saveToDisk(store);
+        }
     }
 
     public void set(String key,
@@ -86,8 +105,10 @@ public class KeyValueStore {
         Entry entry =
                 new Entry(value, null);
 
-        store.put(key, entry);
-        persistenceManager.saveToDisk(store);
+        synchronized (storeLock) {
+            store.put(key, entry);
+            persistenceManager.saveToDisk(store);
+        }
     }
 
     public String get(String key) {
@@ -103,13 +124,15 @@ public class KeyValueStore {
     }
     public boolean delete(String key) {
 
-        Entry removed = store.remove(key);
+        synchronized (storeLock) {
+            Entry removed = store.remove(key);
 
-        if (removed != null) {
-            persistenceManager.saveToDisk(store);
+            if (removed != null) {
+                persistenceManager.saveToDisk(store);
+            }
+
+            return removed != null;
         }
-
-        return removed != null;
     }
     public boolean exists(String key) {
 
@@ -150,8 +173,10 @@ public class KeyValueStore {
     }
     public void clear() {
 
-        store.clear();
-        persistenceManager.saveToDisk(store);
+        synchronized (storeLock) {
+            store.clear();
+            persistenceManager.saveToDisk(store);
+        }
     }
     public int size() {
 

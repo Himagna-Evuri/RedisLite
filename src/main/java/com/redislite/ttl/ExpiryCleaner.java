@@ -10,49 +10,51 @@ public class ExpiryCleaner implements Runnable {
 
     private final Map<String, Entry> store;
     private final PersistenceManager persistenceManager;
+    private final Object storeLock;
 
     public ExpiryCleaner(
             Map<String, Entry> store,
-            PersistenceManager persistenceManager) {
+            PersistenceManager persistenceManager,
+            Object storeLock) {
 
         this.store = store;
         this.persistenceManager = persistenceManager;
+        this.storeLock = storeLock;
     }
-
     private void removeExpiredKeys() {
 
-        boolean removedAny = false;
+        synchronized (storeLock) {
 
-        Iterator<Map.Entry<String, Entry>> iterator =
-                store.entrySet().iterator();
+            boolean removedAny = false;
 
-        while (iterator.hasNext()) {
+            Iterator<Map.Entry<String, Entry>> iterator =
+                    store.entrySet().iterator();
 
-            Map.Entry<String, Entry> current =
-                    iterator.next();
+            while (iterator.hasNext()) {
 
-            Entry entry = current.getValue();
+                Map.Entry<String, Entry> current =
+                        iterator.next();
 
-            if (entry.getExpiryTime() != null &&
-                    entry.getExpiryTime()
-                            <= System.currentTimeMillis()) {
+                Entry entry = current.getValue();
 
-                System.out.println(
-                        "Expired key removed: "
-                                + current.getKey());
+                if (entry.getExpiryTime() != null &&
+                        entry.getExpiryTime()
+                                <= System.currentTimeMillis()) {
 
-                boolean removed = store.remove(current.getKey(), entry);
+                    boolean removed =
+                            store.remove(current.getKey(), entry);
 
-                if (removed) {
-                    removedAny = true;
+                    if (removed) {
+                        System.out.println(
+                                "Expired key removed: " + current.getKey());
+                        removedAny = true;
+                    }
                 }
-
-                removedAny = true;
             }
-        }
 
-        if (removedAny) {
-            persistenceManager.saveToDisk(store);
+            if (removedAny) {
+                persistenceManager.saveToDisk(store);
+            }
         }
     }
 

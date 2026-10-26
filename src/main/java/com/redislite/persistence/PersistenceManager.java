@@ -16,6 +16,10 @@ import java.nio.file.Path;
 public class PersistenceManager {
 
     private static final String FILE_NAME = "dump.rdb";
+    private final Object storeLock;
+    public PersistenceManager(Object storeLock) {
+        this.storeLock = storeLock;
+    }
 
     public void createDatabaseFile() {
 
@@ -34,12 +38,18 @@ public class PersistenceManager {
     }
     public synchronized void saveToDisk(Map<String, Entry> store) {
 
+        Map<String, Entry> snapshot;
+
+        synchronized (storeLock) {
+            snapshot = new java.util.HashMap<>(store);
+        }
         String tempFileName = FILE_NAME + ".tmp";
+
 
         try (FileWriter writer =
                      new FileWriter(tempFileName)) {
 
-            for (Map.Entry<String, Entry> entry : store.entrySet()) {
+            for (Map.Entry<String, Entry> entry : snapshot.entrySet()) {
 
                 Entry storedEntry = entry.getValue();
 
