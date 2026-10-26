@@ -4,6 +4,8 @@ import com.redislite.storage.KeyValueStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assertions;
 import java.util.concurrent.CountDownLatch;
+import java.util.ArrayList;
+import java.util.List;
 
 public class KeyValueStoreTest {
 
@@ -168,5 +170,68 @@ public class KeyValueStoreTest {
 
         store.clear();
     }
+    @Test
+    void concurrentWritesShouldPersistAllKeys() throws InterruptedException {
 
+        KeyValueStore store = new KeyValueStore();
+        store.clear();
+
+        int threadCount = 4;
+        int keysPerThread = 25;
+
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch doneSignal = new CountDownLatch(threadCount);
+
+        List<Thread> workers = new ArrayList<>();
+
+        for (int t = 0; t < threadCount; t++) {
+
+            final int threadId = t;
+
+            Thread worker = new Thread(() -> {
+                try {
+                    startSignal.await();
+
+                    for (int i = 0; i < keysPerThread; i++) {
+                        String key = "thread" + threadId + "_key" + i;
+                        String value = "value" + threadId + "_" + i;
+
+                        store.set(key, value);
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneSignal.countDown();
+                }
+            });
+
+            workers.add(worker);
+            worker.start();
+        }
+
+        startSignal.countDown();
+        doneSignal.await();
+
+        Assertions.assertEquals(
+                threadCount * keysPerThread,
+                store.size());
+
+        KeyValueStore recoveredStore = new KeyValueStore();
+
+        for (int t = 0; t < threadCount; t++) {
+            for (int i = 0; i < keysPerThread; i++) {
+
+                String key = "thread" + t + "_key" + i;
+                String expectedValue = "value" + t + "_" + i;
+
+                Assertions.assertEquals(
+                        expectedValue,
+                        recoveredStore.get(key),
+                        "Incorrect or missing value for key: " + key);
+            }
+        }
+
+        recoveredStore.clear();
+    }
 }
