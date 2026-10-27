@@ -1,21 +1,24 @@
 package com.redislite;
 
+import com.redislite.model.Entry;
+import com.redislite.persistence.PersistenceManager;
 import com.redislite.storage.KeyValueStore;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assertions;
-import java.util.concurrent.CountDownLatch;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import com.redislite.model.Entry;
-import com.redislite.persistence.PersistenceManager;
+import java.util.concurrent.CountDownLatch;
 
 public class KeyValueStoreTest {
 
     @Test
-    void setAndGetShouldReturnValue() {
-
-        KeyValueStore store = new KeyValueStore();
+    void setAndGetShouldReturnValue() throws IOException {
+        KeyValueStore store = createTestStore();
 
         store.set("name", "Himagna");
 
@@ -23,9 +26,8 @@ public class KeyValueStoreTest {
     }
 
     @Test
-    void deleteShouldRemoveKey() {
-
-        KeyValueStore store = new KeyValueStore();
+    void deleteShouldRemoveKey() throws IOException {
+        KeyValueStore store = createTestStore();
 
         store.set("name", "Himagna");
 
@@ -34,10 +36,10 @@ public class KeyValueStoreTest {
         Assertions.assertTrue(deleted);
         Assertions.assertNull(store.get("name"));
     }
-    @Test
-    void existsShouldReturnCorrectResult() {
 
-        KeyValueStore store = new KeyValueStore();
+    @Test
+    void existsShouldReturnCorrectResult() throws IOException {
+        KeyValueStore store = createTestStore();
 
         store.set("name", "Himagna");
 
@@ -47,15 +49,14 @@ public class KeyValueStoreTest {
 
         Assertions.assertFalse(store.exists("name"));
     }
-    @Test
-    void ttlShouldDecreaseAndExpire() throws InterruptedException {
 
-        KeyValueStore store = new KeyValueStore();
+    @Test
+    void ttlShouldDecreaseAndExpire() throws InterruptedException, IOException {
+        KeyValueStore store = createTestStore();
 
         store.set("temporary", "hello", 2);
 
         long ttl = store.ttl("temporary");
-
         Assertions.assertTrue(ttl >= 0 && ttl <= 2);
 
         Thread.sleep(3000);
@@ -63,14 +64,13 @@ public class KeyValueStoreTest {
         Assertions.assertEquals(-2, store.ttl("temporary"));
         Assertions.assertNull(store.get("temporary"));
     }
-    @Test
-    void keysShouldReturnOnlyActiveKeys() {
 
-        KeyValueStore store = new KeyValueStore();
+    @Test
+    void keysShouldReturnOnlyActiveKeys() throws IOException {
+        KeyValueStore store = createTestStore();
 
         store.set("name", "Himagna");
         store.set("city", "Hyderabad");
-
         store.set("temporary", "hello", 1);
 
         Assertions.assertTrue(store.keys().contains("name"));
@@ -80,18 +80,17 @@ public class KeyValueStoreTest {
             Thread.sleep(2000);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new AssertionError("Test interrupted", e);
         }
 
         Assertions.assertFalse(store.keys().contains("temporary"));
     }
+
     @Test
-
-    void flushDbShouldRemoveAllKeys() {
-
-        KeyValueStore store = new KeyValueStore();
+    void flushDbShouldRemoveAllKeys() throws IOException {
+        KeyValueStore store = createTestStore();
 
         store.clear();
-
         store.set("name", "Himagna");
         store.set("city", "Hyderabad");
         store.set("age", "21");
@@ -105,17 +104,23 @@ public class KeyValueStoreTest {
         Assertions.assertNull(store.get("city"));
         Assertions.assertNull(store.get("age"));
     }
+
     @Test
-    void dataShouldPersistAfterRestart() {
+    void dataShouldPersistAfterRestart() throws IOException {
+        Path databaseFile = createTestDatabase();
 
-        KeyValueStore store1 = new KeyValueStore();
-
-        store1.clear();
+        KeyValueStore store1 = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
 
         store1.set("name", "Himagna");
         store1.set("city", "Hyderabad");
 
-        KeyValueStore store2 = new KeyValueStore();
+        KeyValueStore store2 = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
 
         Assertions.assertEquals("Himagna", store2.get("name"));
         Assertions.assertEquals("Hyderabad", store2.get("city"));
@@ -124,10 +129,39 @@ public class KeyValueStoreTest {
     }
 
     @Test
-    void concurrentAccessShouldCompleteSuccessfully()
-            throws InterruptedException {
+    void expiredKeyShouldNotLoadAfterRestart() throws Exception {
+        Path databaseFile = createTestDatabase();
 
-        KeyValueStore store = new KeyValueStore();
+        KeyValueStore store1 = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
+
+        store1.set("expired-key", "old-value", 1);
+
+        // Simulate a crash before the expired-key removal is saved.
+        Files.writeString(
+                databaseFile,
+                "expired-key,old-value,"
+                        + (System.currentTimeMillis() - 1000)
+                        + System.lineSeparator()
+        );
+
+        KeyValueStore store2 = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
+
+        Assertions.assertNull(store2.get("expired-key"));
+        Assertions.assertFalse(store2.exists("expired-key"));
+
+        store2.clear();
+    }
+
+    @Test
+    void concurrentAccessShouldCompleteSuccessfully()
+            throws InterruptedException, IOException {
+        KeyValueStore store = createTestStore();
         store.clear();
 
         int threadCount = 2;
@@ -137,7 +171,6 @@ public class KeyValueStoreTest {
         Thread writer = new Thread(() -> {
             try {
                 startSignal.await();
-
                 for (int i = 0; i < 100; i++) {
                     store.set("shared", "value" + i);
                 }
@@ -151,7 +184,6 @@ public class KeyValueStoreTest {
         Thread reader = new Thread(() -> {
             try {
                 startSignal.await();
-
                 for (int i = 0; i < 100; i++) {
                     store.get("shared");
                     store.exists("shared");
@@ -173,22 +205,24 @@ public class KeyValueStoreTest {
 
         store.clear();
     }
-    @Test
-    void concurrentWritesShouldPersistAllKeys() throws InterruptedException {
 
-        KeyValueStore store = new KeyValueStore();
-        store.clear();
+    @Test
+    void concurrentWritesShouldPersistAllKeys()
+            throws InterruptedException, IOException {
+        Path databaseFile = createTestDatabase();
+
+        KeyValueStore store = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
 
         int threadCount = 4;
         int keysPerThread = 25;
-
         CountDownLatch startSignal = new CountDownLatch(1);
         CountDownLatch doneSignal = new CountDownLatch(threadCount);
-
         List<Thread> workers = new ArrayList<>();
 
         for (int t = 0; t < threadCount; t++) {
-
             final int threadId = t;
 
             Thread worker = new Thread(() -> {
@@ -198,10 +232,8 @@ public class KeyValueStoreTest {
                     for (int i = 0; i < keysPerThread; i++) {
                         String key = "thread" + threadId + "_key" + i;
                         String value = "value" + threadId + "_" + i;
-
                         store.set(key, value);
                     }
-
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -216,147 +248,172 @@ public class KeyValueStoreTest {
         startSignal.countDown();
         doneSignal.await();
 
-        Assertions.assertEquals(
-                threadCount * keysPerThread,
-                store.size());
+        Assertions.assertEquals(threadCount * keysPerThread, store.size());
 
-        KeyValueStore recoveredStore = new KeyValueStore();
+        KeyValueStore recoveredStore = new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
 
         for (int t = 0; t < threadCount; t++) {
             for (int i = 0; i < keysPerThread; i++) {
-
                 String key = "thread" + t + "_key" + i;
                 String expectedValue = "value" + t + "_" + i;
 
                 Assertions.assertEquals(
                         expectedValue,
                         recoveredStore.get(key),
-                        "Incorrect or missing value for key: " + key);
+                        "Incorrect or missing value for key: " + key
+                );
             }
         }
 
         recoveredStore.clear();
     }
+
     @Test
-    void setShouldRollbackWhenPersistenceFails() {
+    void setShouldRollbackWhenPersistenceFails() throws IOException {
+        Path databaseFile = createTestDatabase();
 
         KeyValueStore store = new KeyValueStore(
-                FailingPersistenceManager::new);
-
-        Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> store.set("name", "Himagna"));
-
-        Assertions.assertNull(store.get("name"));
-    }
-    @Test
-    void setShouldRestorePreviousValueWhenPersistenceFails() {
-
-        TogglePersistenceManager[] manager =
-                new TogglePersistenceManager[1];
-
-        KeyValueStore store = new KeyValueStore(lock -> {
-            manager[0] = new TogglePersistenceManager(lock);
-            return manager[0];
-        });
-
-        store.set("rollback-test", "Original");
-
-        manager[0].setFailSaves(true);
-
-        Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> store.set("rollback-test", "Updated"));
-
-        Assertions.assertEquals(
-                "Original",
-                store.get("rollback-test"));
-    }
-    @Test
-    void deleteShouldRestoreKeyWhenPersistenceFails() {
-
-        TogglePersistenceManager[] manager =
-                new TogglePersistenceManager[1];
-
-        KeyValueStore store = new KeyValueStore(lock -> {
-            manager[0] = new TogglePersistenceManager(lock);
-            return manager[0];
-        });
-
-        store.set("delete-test", "Original");
-
-        manager[0].setFailSaves(true);
-
-        Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> store.delete("delete-test"));
-
-        Assertions.assertEquals(
-                "Original",
-                store.get("delete-test"));
-    }
-
-
-
-    @Test
-    void expiredKeyShouldStayRemovedWhenPersistenceFails() {
-        TogglePersistenceManager[] manager =
-                new TogglePersistenceManager[1];
-
-        KeyValueStore store = new KeyValueStore(
-                lock -> {
-                    manager[0] = new TogglePersistenceManager(lock);
-                    return manager[0];
-                },
+                lock -> new FailingPersistenceManager(lock, databaseFile),
                 false
         );
 
-        store.set("expired-test", "OldValue", 1);
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.set("name", "Himagna")
+        );
 
+        Assertions.assertNull(store.get("name"));
+    }
+
+    @Test
+    void setShouldRestorePreviousValueWhenPersistenceFails() throws IOException {
+        TogglePersistenceManager[] manager = new TogglePersistenceManager[1];
+        Path databaseFile = createTestDatabase();
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock, databaseFile);
+            return manager[0];
+        }, false);
+
+        store.set("rollback-test", "Original");
+        manager[0].setFailSaves(true);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.set("rollback-test", "Updated")
+        );
+
+        Assertions.assertEquals("Original", store.get("rollback-test"));
+    }
+
+    @Test
+    void deleteShouldRestoreKeyWhenPersistenceFails() throws IOException {
+        TogglePersistenceManager[] manager = new TogglePersistenceManager[1];
+        Path databaseFile = createTestDatabase();
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock, databaseFile);
+            return manager[0];
+        }, false);
+
+        store.set("delete-test", "Original");
+        manager[0].setFailSaves(true);
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> store.delete("delete-test")
+        );
+
+        Assertions.assertEquals("Original", store.get("delete-test"));
+    }
+
+    @Test
+    void expiredKeyShouldStayRemovedWhenPersistenceFails() throws IOException {
+        TogglePersistenceManager[] manager = new TogglePersistenceManager[1];
+        Path databaseFile = createTestDatabase();
+
+        KeyValueStore store = new KeyValueStore(lock -> {
+            manager[0] = new TogglePersistenceManager(lock, databaseFile);
+            return manager[0];
+        }, false);
+
+        store.set("temporary", "value", 1);
         manager[0].setFailSaves(true);
 
         try {
             Thread.sleep(1100);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw new AssertionError("Test interrupted", e);
         }
 
-        Assertions.assertNull(store.get("expired-test"));
-        Assertions.assertFalse(store.exists("expired-test"));
+        Assertions.assertNull(store.get("temporary"));
+        Assertions.assertFalse(store.exists("temporary"));
     }
 
-
     @Test
-    void clearShouldRestoreAllKeysWhenPersistenceFails() {
-
-        TogglePersistenceManager[] manager =
-                new TogglePersistenceManager[1];
+    void clearShouldRestoreAllKeysWhenPersistenceFails() throws IOException {
+        TogglePersistenceManager[] manager = new TogglePersistenceManager[1];
+        Path databaseFile = createTestDatabase();
 
         KeyValueStore store = new KeyValueStore(lock -> {
-            manager[0] = new TogglePersistenceManager(lock);
+            manager[0] = new TogglePersistenceManager(lock, databaseFile);
             return manager[0];
-        });
+        }, false);
 
         store.set("name", "Himagna");
         store.set("city", "Hyderabad");
 
         manager[0].setFailSaves(true);
 
-        Assertions.assertThrows(
-                IllegalStateException.class,
-                store::clear);
+        Assertions.assertThrows(IllegalStateException.class, store::clear);
 
         Assertions.assertEquals(2, store.size());
         Assertions.assertEquals("Himagna", store.get("name"));
         Assertions.assertEquals("Hyderabad", store.get("city"));
     }
 
-    private static class FailingPersistenceManager
-            extends PersistenceManager {
+    @Test
+    void loadShouldThrowWhenDatabaseFileCannotBeRead() throws Exception {
+        Path directory = Files.createTempDirectory("redislite-test");
+        Path databaseFile = directory.resolve("dump.rdb");
 
-        public FailingPersistenceManager(Object storeLock) {
-            super(storeLock);
+        try {
+            Files.createDirectory(databaseFile);
+
+            PersistenceManager manager =
+                    new PersistenceManager(new Object(), databaseFile);
+
+            Assertions.assertThrows(
+                    IllegalStateException.class,
+                    () -> manager.loadFromDisk(new java.util.HashMap<>())
+            );
+        } finally {
+            Files.deleteIfExists(databaseFile);
+            Files.deleteIfExists(directory);
+        }
+    }
+
+    private Path createTestDatabase() throws IOException {
+        Path tempDir = Files.createTempDirectory("redislite-test-");
+        return tempDir.resolve("dump.rdb");
+    }
+
+    private KeyValueStore createTestStore() throws IOException {
+        Path databaseFile = createTestDatabase();
+
+        return new KeyValueStore(
+                lock -> new PersistenceManager(lock, databaseFile),
+                false
+        );
+    }
+
+    private static class FailingPersistenceManager extends PersistenceManager {
+        FailingPersistenceManager(Object storeLock, Path databaseFile) {
+            super(storeLock, databaseFile);
         }
 
         @Override
@@ -364,16 +421,15 @@ public class KeyValueStoreTest {
             return false;
         }
     }
-    private static class TogglePersistenceManager
-            extends PersistenceManager {
 
+    private static class TogglePersistenceManager extends PersistenceManager {
         private boolean failSaves;
 
-        public TogglePersistenceManager(Object storeLock) {
-            super(storeLock);
+        TogglePersistenceManager(Object storeLock, Path databaseFile) {
+            super(storeLock, databaseFile);
         }
 
-        public void setFailSaves(boolean failSaves) {
+        void setFailSaves(boolean failSaves) {
             this.failSaves = failSaves;
         }
 
@@ -382,7 +438,6 @@ public class KeyValueStoreTest {
             if (failSaves) {
                 return false;
             }
-
             return super.saveToDisk(store);
         }
     }
