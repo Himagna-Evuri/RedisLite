@@ -5,7 +5,6 @@ import com.redislite.persistence.PersistenceManager;
 import com.redislite.storage.KeyValueStore;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +12,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 
 public class KeyValueStoreTest {
@@ -296,6 +297,69 @@ public class KeyValueStoreTest {
         }
 
         recoveredStore.clear();
+    }
+
+    @Test
+    void concurrentSavesShouldLeaveDatabaseValid()
+            throws InterruptedException, IOException {
+
+        Path databaseFile = createTestDatabase();
+        Object lock = new Object();
+
+        PersistenceManager manager =
+                new PersistenceManager(lock, databaseFile);
+
+        Map<String, Entry> store = new HashMap<>();
+
+        int keyCount = 100;
+
+        for (int i = 0; i < keyCount; i++) {
+            store.put("key" + i, new Entry("value" + i, null));
+        }
+
+        int threadCount = 4;
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch doneSignal = new CountDownLatch(threadCount);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        for (int t = 0; t < threadCount; t++) {
+            Thread worker = new Thread(() -> {
+                try {
+                    startSignal.await();
+
+                    for (int i = 0; i < 20; i++) {
+                        if (!manager.saveToDisk(store)) {
+                            throw new AssertionError("Database save failed");
+                        }
+                    }
+                } catch (Throwable e) {
+                    failure.compareAndSet(null, e);
+                } finally {
+                    doneSignal.countDown();
+                }
+            });
+
+            worker.start();
+        }
+
+        startSignal.countDown();
+        doneSignal.await();
+
+        Assertions.assertNull(failure.get(), "A concurrent save failed");
+
+        Map<String, Entry> recovered = new HashMap<>();
+        manager.loadFromDisk(recovered);
+
+        Assertions.assertEquals(keyCount, recovered.size());
+
+        for (int i = 0; i < keyCount; i++) {
+            Assertions.assertEquals(
+                    "value" + i,
+                    recovered.get("key" + i).getValue()
+            );
+        }
+
+        Files.deleteIfExists(databaseFile);
     }
 
     @Test

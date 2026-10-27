@@ -75,62 +75,58 @@ public class PersistenceManager {
             );
         }
     }
-
     public boolean saveToDisk(Map<String, Entry> store) {
-        Map<String, Entry> snapshot;
-
         synchronized (storeLock) {
-            snapshot = new HashMap<>(store);
-        }
+            Map<String, Entry> snapshot = new HashMap<>(store);
 
-        Path tempPath = Path.of(databasePath.toString() + ".tmp");
-
-        try {
-            try (FileWriter writer = new FileWriter(tempPath.toFile())) {
-                for (Map.Entry<String, Entry> entry : snapshot.entrySet()) {
-                    Entry storedEntry = entry.getValue();
-
-                    String key = entry.getKey()
-                            .replace("\\", "\\\\")
-                            .replace(",", "\\,");
-
-                    String value = storedEntry.getValue()
-                            .replace("\\", "\\\\")
-                            .replace(",", "\\,");
-
-                    String line = key + "," + value + ","
-                            + storedEntry.getExpiryTime();
-
-                    writer.write(line);
-                    writer.write(System.lineSeparator());
-                }
-            }
+            Path tempPath = Path.of(databasePath.toString() + ".tmp");
 
             try {
-                Files.move(
-                        tempPath,
-                        databasePath,
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE
-                );
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(
-                        tempPath,
-                        databasePath,
-                        StandardCopyOption.REPLACE_EXISTING
-                );
-            }
+                try (FileWriter writer = new FileWriter(tempPath.toFile())) {
+                    for (Map.Entry<String, Entry> entry : snapshot.entrySet()) {
+                        Entry storedEntry = entry.getValue();
 
-            return true;
-        } catch (IOException e) {
-            System.err.println(
-                    "Failed to save database to disk: " + databasePath
-            );
-            e.printStackTrace();
-            return false;
+                        String key = entry.getKey()
+                                .replace("\\", "\\\\")
+                                .replace(",", "\\,");
+
+                        String value = storedEntry.getValue()
+                                .replace("\\", "\\\\")
+                                .replace(",", "\\,");
+
+                        String line = key + "," + value + ","
+                                + storedEntry.getExpiryTime();
+
+                        writer.write(line);
+                        writer.write(System.lineSeparator());
+                    }
+                }
+
+                try {
+                    Files.move(
+                            tempPath,
+                            databasePath,
+                            StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.ATOMIC_MOVE
+                    );
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(
+                            tempPath,
+                            databasePath,
+                            StandardCopyOption.REPLACE_EXISTING
+                    );
+                }
+
+                return true;
+            } catch (IOException e) {
+                System.err.println(
+                        "Failed to save database to disk: " + databasePath
+                );
+                e.printStackTrace();
+                return false;
+            }
         }
     }
-
     public void loadFromDisk(Map<String, Entry> store) {
         try (BufferedReader br = new BufferedReader(
                 new FileReader(databasePath.toFile()))) {
