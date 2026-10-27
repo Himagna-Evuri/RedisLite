@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
+
 public class KeyValueStoreTest {
 
     @Test
@@ -64,6 +65,32 @@ public class KeyValueStoreTest {
         Assertions.assertEquals(-2, store.ttl("temporary"));
         Assertions.assertNull(store.get("temporary"));
     }
+
+
+    @Test
+    void ttlShouldReturnZeroWhenLessThanOneSecondRemains() throws IOException {
+        KeyValueStore store = createTestStore();
+
+        store.set("short-ttl", "hello", 2);
+
+        try {
+            Thread.sleep(1200);
+
+            long ttl = store.ttl("short-ttl");
+
+            Assertions.assertEquals(
+                    0,
+                    ttl,
+                    "TTL should be zero when less than one second remains"
+            );
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Test interrupted", e);
+        } finally {
+            store.clear();
+        }
+    }
+
 
     @Test
     void keysShouldReturnOnlyActiveKeys() throws IOException {
@@ -410,6 +437,7 @@ public class KeyValueStoreTest {
                 false
         );
     }
+
 
     private static class FailingPersistenceManager extends PersistenceManager {
         FailingPersistenceManager(Object storeLock, Path databaseFile) {
