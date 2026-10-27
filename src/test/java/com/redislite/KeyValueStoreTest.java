@@ -92,6 +92,17 @@ public class KeyValueStoreTest {
         }
     }
 
+    @Test
+    void ttlShouldReturnMinusOneForKeyWithoutExpiry() throws IOException {
+        KeyValueStore store = createTestStore();
+
+        store.set("permanent", "hello");
+
+        Assertions.assertEquals(-1, store.ttl("permanent"));
+
+        store.clear();
+    }
+
 
     @Test
     void keysShouldReturnOnlyActiveKeys() throws IOException {
