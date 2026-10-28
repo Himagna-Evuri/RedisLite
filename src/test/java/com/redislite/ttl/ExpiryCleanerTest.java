@@ -73,4 +73,37 @@ class ExpiryCleanerTest {
                 store.containsKey("expired")
         );
     }
+    @Test
+    void cleanerShouldPreserveNonExpiredKeys() throws IOException {
+        Path directory = Files.createTempDirectory("redislite-test-");
+        Path databaseFile = directory.resolve("dump.rdb");
+
+        Object storeLock = new Object();
+        Map<String, Entry> store = new ConcurrentHashMap<>();
+
+        PersistenceManager persistenceManager =
+                new PersistenceManager(storeLock, databaseFile);
+
+        persistenceManager.createDatabaseFile();
+
+        Entry permanentEntry = new Entry("keep-me", null);
+        Entry futureEntry = new Entry(
+                "still-valid",
+                System.currentTimeMillis() + 60_000
+        );
+
+        store.put("permanent", permanentEntry);
+        store.put("future", futureEntry);
+
+        ExpiryCleaner cleaner =
+                new ExpiryCleaner(store, persistenceManager, storeLock);
+
+        cleaner.removeExpiredKeys();
+
+        assertEquals("keep-me", store.get("permanent").getValue());
+        assertEquals("still-valid", store.get("future").getValue());
+
+        Files.deleteIfExists(databaseFile);
+        Files.deleteIfExists(directory);
+    }
 }

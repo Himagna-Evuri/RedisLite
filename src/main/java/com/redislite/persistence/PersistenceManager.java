@@ -75,10 +75,10 @@ public class PersistenceManager {
             );
         }
     }
+
     public boolean saveToDisk(Map<String, Entry> store) {
         synchronized (storeLock) {
             Map<String, Entry> snapshot = new HashMap<>(store);
-
             Path tempPath = Path.of(databasePath.toString() + ".tmp");
 
             try {
@@ -124,9 +124,19 @@ public class PersistenceManager {
                 );
                 e.printStackTrace();
                 return false;
+            } finally {
+                try {
+                    Files.deleteIfExists(tempPath);
+                } catch (IOException e) {
+                    System.err.println(
+                            "Warning: Could not delete temporary database file: "
+                                    + tempPath
+                    );
+                }
             }
         }
     }
+
     public void loadFromDisk(Map<String, Entry> store) {
         try (BufferedReader br = new BufferedReader(
                 new FileReader(databasePath.toFile()))) {
