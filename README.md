@@ -1,27 +1,114 @@
 # RedisLite
 
-RedisLite is a lightweight, Redis-inspired in-memory key-value store built in Java.
+**A Lightweight, Redis-Inspired In-Memory Key-Value Store Built with Java**
 
-The project implements core key-value operations along with TTL-based key expiration, background expiry cleanup, file-based persistence, command parsing, and automated testing.
+RedisLite is a Java-based, Redis-inspired key-value store that demonstrates the core concepts behind in-memory databases. It combines fast in-memory data access, TTL-based expiration, background cleanup, file-based persistence, and command-line interaction in a modular implementation.
 
-It was built as a hands-on project to understand how an in-memory database works internally, including data storage, expiration, persistence, concurrency, and command processing.
+The project explores how key-value stores manage data, handle expiration, preserve state across restarts, and coordinate concurrent operations.
+
+## Table of Contents
+
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [Architecture](#architecture)
+- [Supported Commands](#supported-commands)
+- [How TTL Works](#how-ttl-works)
+- [Persistence and Recovery](#persistence-and-recovery)
+- [Concurrency and Thread Safety](#concurrency-and-thread-safety)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Example Session](#example-session)
+- [Testing](#testing)
+- [Design Decisions](#design-decisions)
+- [Limitations and Future Improvements](#limitations-and-future-improvements)
+- [Learning Outcomes](#learning-outcomes)
+- [Author](#author)
 
 ## Features
 
-- In-memory key-value storage using `ConcurrentHashMap`
-- `SET` and `GET` operations
-- `DEL` and `EXISTS` operations
-- TTL (Time-To-Live) support
-- Automatic background removal of expired keys
-- `KEYS` command to retrieve active keys
-- `FLUSHDB`-style database clearing
-- File-based persistence using `dump.rdb`
-- Persistence across application restarts
-- Safe persistence using temporary-file replacement
-- Support for commas and backslashes in keys and values
-- Command parsing and command handling layers
-- JUnit 5 automated tests
-- Maven build and test support
+- **In-memory storage:** Stores key-value pairs using Java's `ConcurrentHashMap`.
+- **Core operations:** Supports setting, retrieving, deleting, and checking keys.
+- **TTL-based expiration:** Allows keys to expire after a specified duration.
+- **Lazy expiration:** Checks whether a key has expired when it is accessed.
+- **Background cleanup:** Periodically scans the store and removes expired entries.
+- **Persistent storage:** Saves database state to a local `dump.rdb` file.
+- **Restart recovery:** Loads previously saved entries when the application starts.
+- **Safer file updates:** Writes to a temporary file before replacing the main database file.
+- **Escaped record format:** Supports commas and backslashes in keys and values.
+- **Command-line interface:** Accepts Redis-inspired commands through a parser and command handler.
+- **Automated testing:** Uses JUnit 5 to test storage and expiration behavior.
+- **Concurrency-aware persistence:** Uses synchronization to coordinate persistence operations that share the same lock.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Java 21 | Core implementation |
+| Maven | Build and dependency management |
+| JUnit 5 | Automated testing |
+| `ConcurrentHashMap` | Concurrent in-memory storage |
+| Java I/O and NIO | File operations and persistence |
+| Git and GitHub | Version control and source-code hosting |
+| IntelliJ IDEA | Development environment |
+
+## Architecture
+
+RedisLite uses a layered design that separates command processing, storage, expiration, and persistence responsibilities.
+
+```text
+                 User
+                   |
+                   v
+                  Main
+                   |
+                   v
+             CommandParser
+                   |
+                   v
+             CommandHandler
+                   |
+                   v
+              KeyValueStore
+                   |
+          +--------+---------+
+          |        |         |
+          v        v         v
+      In-Memory   TTL      Persistence
+       Storage   Cleanup    Manager
+          |        |         |
+          v        v         v
+    ConcurrentHashMap     dump.rdb
+```
+
+### Core Components
+
+**`Main`**
+
+The application entry point. It reads user commands from the command line and passes them to the command-processing layer.
+
+**`CommandParser`**
+
+Processes command-line input, separates command arguments, and normalizes command names.
+
+**`CommandHandler`**
+
+Interprets supported commands and delegates the corresponding operations to `KeyValueStore`.
+
+**`KeyValueStore`**
+
+The central storage component. It manages key-value operations, validates entries against expiration timestamps, coordinates mutations with persistence, and initializes the store.
+
+**`Entry`**
+
+Represents an individual stored record. It contains the value and an optional absolute expiration timestamp.
+
+**`ExpiryCleaner`**
+
+Runs a background cleanup process that periodically identifies expired entries and removes them from memory.
+
+**`PersistenceManager`**
+
+Handles database file creation, loading saved entries, serializing the store, and replacing the database file through a temporary file.
 
 ## Supported Commands
 
@@ -30,134 +117,81 @@ RedisLite provides a simple command-line interface inspired by Redis.
 | Command | Description | Example |
 |---|---|---|
 | `SET` | Stores a key-value pair | `SET name Himagna` |
-| `SET` with TTL | Stores a key-value pair with expiration | `SET session abc 10` |
-| `GET` | Retrieves the value of a key | `GET name` |
+| `SET` with TTL | Stores a key with an expiration time in seconds | `SET session abc 10` |
+| `GET` | Retrieves a key's value | `GET name` |
 | `DEL` | Deletes a key | `DEL name` |
 | `EXISTS` | Checks whether a key exists | `EXISTS name` |
-| `TTL` | Returns the remaining TTL of a key | `TTL session` |
-| `KEYS` | Returns all active keys | `KEYS` |
-| `FLUSHDB` | Removes all stored keys | `FLUSHDB` |
-| `EXIT` | Closes RedisLite | `EXIT` |
+| `TTL` | Returns the remaining lifetime | `TTL session` |
+| `KEYS` | Lists active keys | `KEYS` |
+| `FLUSHDB` | Clears the current store | `FLUSHDB` |
+| `EXIT` | Exits the application | `EXIT` |
+
+These commands provide a Redis-inspired interface; RedisLite is not a fully Redis-compatible server.
 
 ### TTL Return Values
 
-The `TTL` command follows Redis-style return values:
+The `TTL` operation uses the following return conventions:
 
-- `-1` — Key exists but has no expiration
-- `-2` — Key does not exist or has expired
-- Non-negative value — Remaining TTL in seconds
+- `-1`: The key exists and has no expiration.
+- `-2`: The key does not exist or has expired.
+- Non-negative value: The remaining lifetime in seconds.
 
-## Architecture
+Because the remaining lifetime is expressed in whole seconds, a valid key with less than one second remaining may report `0`.
 
-RedisLite follows a layered architecture:
+## How TTL Works
 
-```text
-User
- │
- ▼
-Main
- │
- ▼
-CommandParser
- │
- ▼
-CommandHandler
- │
- ▼
-KeyValueStore
- ├── In-memory storage
- │     └── ConcurrentHashMap
- │
- ├── TTL management
- │     └── Background expiry thread
- │
- └── Persistence
-       └── PersistenceManager
-             │
-             ▼
-          dump.rdb
-```
+TTL stands for **Time To Live**. It specifies how long a key should remain valid after it is stored.
 
-### Components
-
-#### `Main`
-
-Acts as the entry point of the application. It reads commands from the command line and passes them through the parser and command handler.
-
-#### `CommandParser`
-
-Parses user input into individual command arguments and normalizes the command name to uppercase.
-
-#### `CommandHandler`
-
-Handles commands such as `SET`, `GET`, `DEL`, `TTL`, `KEYS`, and `FLUSHDB` and connects them to the corresponding `KeyValueStore` operations.
-
-#### `KeyValueStore`
-
-Contains the core database logic.
-
-It manages key-value pairs using a thread-safe `ConcurrentHashMap` and handles storing, retrieving, deleting, checking, and clearing keys.
-
-It also contains the logic for checking expired keys and running the background expiry thread.
-
-#### `PersistenceManager`
-
-Responsible for saving the current database state to `dump.rdb` and loading it when RedisLite starts.
-
-It also performs safe file replacement using a temporary file.
-
-#### `Entry`
-
-Represents a stored record containing:
-
-- Value
-- Optional expiration timestamp
-
-## TTL Mechanism
-
-RedisLite supports expiration of keys using Time-To-Live (TTL).
-
-When a key is stored with a TTL, RedisLite calculates an absolute expiration timestamp:
+When a key is created with a TTL, RedisLite calculates an absolute expiration timestamp:
 
 ```text
-expiryTime = currentTime + (ttlSeconds × 1000)
+expiryTime = currentTimeMillis + (ttlSeconds * 1000)
 ```
 
-The timestamp is stored along with the value in the `Entry` object.
+The expiration timestamp is stored in the `Entry` object alongside the value.
 
-### Expiration Strategy
+### Expiration Strategies
 
-RedisLite uses two mechanisms to handle expired keys:
+RedisLite uses two complementary expiration mechanisms.
 
-1. **Lazy expiration** — expired keys are detected when they are accessed.
-2. **Active expiration** — a background thread periodically scans and removes expired entries.
+**1. Lazy expiration**
+
+When an operation accesses a key, the store checks whether the entry has expired. If it has, RedisLite removes the expired entry rather than returning it as a valid value.
+
+**2. Active expiration**
+
+A background `ExpiryCleaner` periodically scans the store and removes expired entries, even if they are never accessed again.
+
+### Expiration Flow
 
 ```text
 SET session abc 10
-        │
-        ▼
-Calculate expiry timestamp
-        │
-        ▼
+        |
+        v
+Calculate expiration timestamp
+        |
+        v
 Store Entry(value, expiryTime)
-        │
-        ▼
-Background expiry thread
-        │
-        ▼
-Check periodically
-        │
-        ▼
-Remove expired key
+        |
+        +--------------------------+
+        |                          |
+        v                          v
+ Check on access             Background scan
+ (lazy expiration)           (active expiration)
+        |                          |
+        +------------+-------------+
+                     |
+                     v
+             Remove expired entry
 ```
 
-This combination prevents expired keys from remaining in memory indefinitely.
+Combining these approaches helps prevent expired entries from remaining in memory indefinitely while the application is running.
 
-## Persistence
+## Persistence and Recovery
 
-RedisLite provides file-based persistence so that data can survive application restarts.
+An in-memory store loses its data when the application terminates unless the data is saved elsewhere. RedisLite addresses this using local file-based persistence.
 
-The database state is stored in:
+The database file is:
 
 ```text
 dump.rdb
@@ -165,64 +199,63 @@ dump.rdb
 
 ### Saving Data
 
-Whenever the database is modified through operations such as `SET`, `DEL`, or `FLUSHDB`, the current state is written to disk by the `PersistenceManager`.
+When supported storage mutations occur, `PersistenceManager` serializes the current database state into the persistence file.
 
-The stored format is:
+The record format is:
 
 ```text
 key,value,expiryTime
 ```
 
-For example:
+Example:
 
 ```text
 name,Himagna,null
 session,abc,1750000000000
 ```
 
-Keys and values containing commas or backslashes are escaped before being written to the file.
+Here, `null` represents a key without an expiration timestamp. A numeric expiration timestamp represents a key with a TTL.
 
-### Loading Data
+Commas and backslashes in keys and values are escaped so that records can be parsed correctly.
 
-When RedisLite starts:
+### Safer File Replacement
 
-```text
-Application starts
-      │
-      ▼
-Create database file if necessary
-      │
-      ▼
-Load existing data from dump.rdb
-      │
-      ▼
-Populate ConcurrentHashMap
-      │
-      ▼
-Start background expiry thread
-```
-
-This allows previously stored data to be available after restarting the application.
-
-### Safe File Replacement
-
-RedisLite first writes database updates to a temporary file:
+Instead of directly overwriting the main database file, RedisLite writes to a temporary file first:
 
 ```text
 dump.rdb.tmp
 ```
 
-After the write succeeds, the temporary file replaces the existing database file.
+The process is:
 
-This reduces the risk of leaving the main database file partially written if a write operation fails.
+1. Capture the current store state.
+2. Write the serialized records to the temporary file.
+3. Replace `dump.rdb` with the temporary file after the write succeeds.
+4. Clean up any remaining temporary file on a best-effort basis.
 
-## Thread Safety
+This approach reduces the risk of leaving the main database file partially written if a write operation fails. It does not guarantee recovery from every crash or storage failure.
 
-RedisLite uses `ConcurrentHashMap` as the underlying in-memory data structure.
+### Loading Data After Restart
 
-This allows the main application thread and the background expiry thread to access the store concurrently.
+During initialization, RedisLite creates the database file if necessary and loads existing valid records into memory. Expired records are skipped.
 
-The persistence write operation is synchronized so that multiple threads cannot execute the persistence operation simultaneously.
+This allows previously persisted data to be restored when RedisLite starts again.
+
+## Concurrency and Thread Safety
+
+RedisLite uses `ConcurrentHashMap` for in-memory storage because the application can access the store while a background thread performs expiration cleanup.
+
+The implementation also uses a shared lock to coordinate operations that need consistent interaction between memory and persistence.
+
+Important design choices include:
+
+- **Concurrent storage:** `ConcurrentHashMap` supports concurrent map operations.
+- **Coordinated persistence:** Save operations sharing the same lock are serialized.
+- **Conditional removal:** Expiration cleanup checks that the entry being removed is still the expected entry, helping avoid deleting a replacement value.
+- **Temporary-file replacement:** Reduces the risk of partially overwriting the primary database file.
+- **Failure handling:** Storage mutations can roll back in-memory changes when their persistence save fails.
+
+Thread safety is not provided by `ConcurrentHashMap` alone. Multi-step operations require appropriate synchronization, and the current design does not coordinate multiple application processes writing to the same database file.
 
 ## Project Structure
 
@@ -234,70 +267,82 @@ RedisLite/
 │   │       └── com/
 │   │           └── redislite/
 │   │               ├── Main.java
-│   │               │
 │   │               ├── model/
 │   │               │   └── Entry.java
-│   │               │
 │   │               ├── parser/
 │   │               │   ├── CommandParser.java
 │   │               │   └── CommandHandler.java
-│   │               │
 │   │               ├── storage/
 │   │               │   └── KeyValueStore.java
-│   │               │
 │   │               ├── persistence/
 │   │               │   └── PersistenceManager.java
-│   │               │
 │   │               └── ttl/
 │   │                   └── ExpiryCleaner.java
-│   │
 │   └── test/
 │       └── java/
 │           └── com/
 │               └── redislite/
-│                   └── KeyValueStoreTest.java
-│
+│                   ├── KeyValueStoreTest.java
+│                   └── ttl/
+│                       └── ExpiryCleanerTest.java
 ├── pom.xml
 ├── .gitignore
 └── README.md
 ```
 
-## How to Run
+## Getting Started
 
 ### Prerequisites
 
 - Java JDK 21 or later
-- IntelliJ IDEA or another Java IDE
-- Maven
+- Apache Maven compatible with the project's `pom.xml`
+- Git, if cloning the repository
 
-### Run Using IntelliJ IDEA
+Verify that Java is installed:
 
-1. Open the RedisLite project in IntelliJ IDEA.
-2. Make sure JDK 21 is configured.
-3. Open `Main.java`.
-4. Run the `main()` method.
-5. Enter RedisLite commands in the terminal.
+```bash
+java -version
+javac -version
+```
 
-### Build and Test
+### 1. Clone the Repository
 
-Run:
+```bash
+git clone https://github.com/Himagna-Evuri/RedisLite.git
+cd RedisLite
+```
+
+### 2. Open the Project
+
+Open the project directory in IntelliJ IDEA and allow Maven to load the project dependencies.
+
+Ensure the project SDK is configured to use JDK 21 or a compatible later version.
+
+### 3. Build and Test
+
+From the project root, run:
 
 ```bash
 mvn clean test
 ```
 
-Expected result:
+This command cleans previous build output, compiles the project, and runs the automated tests.
 
-```text
-Tests run: 7
-Failures: 0
-Errors: 0
-Skipped: 0
+If Maven is not available on your system's PATH, use IntelliJ IDEA's bundled Maven installation or run the tests through IntelliJ's Maven tool window.
 
-BUILD SUCCESS
-```
+### 4. Run the Application
 
-### Example Session
+In IntelliJ IDEA:
+
+1. Navigate to `src/main/java/com/redislite/Main.java`.
+2. Run the `main()` method.
+3. Enter supported RedisLite commands in the application console.
+
+The application uses `dump.rdb` for persistence. Keep track of this file when testing persistence and restart behavior.
+
+## Example Session
+
+A typical command-line session looks like this:
 
 ```text
 SET name Himagna
@@ -323,110 +368,98 @@ null
 
 FLUSHDB
 OK
-```
 
-Use:
-
-```text
 EXIT
 ```
 
-to close RedisLite.
+The remaining TTL shown in this example is illustrative; the actual value depends on elapsed time.
 
 ## Testing
 
 RedisLite uses JUnit 5 for automated testing.
 
-The test suite currently verifies:
-
-- `SET` and `GET`
-- `DELETE`
-- `EXISTS`
-- TTL behavior and automatic expiration
-- `KEYS`
-- `FLUSHDB`
-- Data persistence across application restart
-
-Current test result:
+The latest verified test run completed with:
 
 ```text
-7 tests
-7 passed
-0 failures
-0 errors
+Tests run: 22
+Failures: 0
+Errors: 0
+Skipped: 0
+
+BUILD SUCCESS
 ```
+
+The test suite covers storage operations, TTL behavior, persistence-related behavior, expiration cleanup, and protection against removing replacement entries.
+
+Run the tests with:
+
+```bash
+mvn clean test
+```
+
+The result above reflects the latest verified run and may change if the code or tests are modified.
 
 ## Design Decisions
 
-### `ConcurrentHashMap`
+### `ConcurrentHashMap` for In-Memory Storage
 
-A `ConcurrentHashMap` is used for in-memory storage because RedisLite has a background thread that removes expired entries while the main application may simultaneously access the store.
+A concurrent map is appropriate for a store accessed by both the main application and the background expiry thread. Additional synchronization is still required for operations involving multiple steps or persistence.
 
-### Absolute Expiration Timestamp
+### Absolute Expiration Timestamps
 
-Instead of storing the remaining TTL, RedisLite stores an absolute expiration timestamp.
+Storing an absolute expiration time allows RedisLite to check whether a key has expired without repeatedly tracking the elapsed lifetime.
 
-Expiration can be checked using:
+### Lazy and Active Expiration
 
-```text
-currentTime >= expiryTime
-```
+Lazy expiration checks entries when accessed, while active expiration periodically scans the store. Using both mechanisms helps remove expired entries even when no client accesses them.
 
-### Lazy + Active Expiration
+### Separation of Responsibilities
 
-RedisLite combines:
+Command parsing, command handling, storage, persistence, and expiration are organized into separate classes. This makes the implementation easier to understand, test, and extend.
 
-- **Lazy expiration** — expired keys are detected when accessed.
-- **Active expiration** — a background thread periodically removes expired keys.
+### Temporary-File Replacement
 
-### Separate Persistence Layer
+Writing to a temporary file before replacing the main database file reduces the chance of corrupting the existing file during a failed write. It is a safeguard, not a complete crash-recovery protocol.
 
-Persistence logic is isolated inside `PersistenceManager` rather than being embedded entirely within `KeyValueStore`.
+### Persistence Failure Handling
 
-This keeps storage and persistence responsibilities separated.
-
-### Temporary File Replacement
-
-Database updates are first written to a temporary file and then moved over the main database file.
-
-This helps reduce the possibility of leaving `dump.rdb` partially written after a failed write.
-
-### Escaped File Format
-
-Keys and values are escaped before being stored because commas are used as field separators in the persistence format.
-
-This allows keys and values containing commas or backslashes to be stored and reconstructed correctly.
+Storage mutations coordinate in-memory changes with persistence and can roll back changes when saving fails. This helps avoid reporting a successful persistent mutation when the corresponding save was unsuccessful.
 
 ## Limitations and Future Improvements
 
-RedisLite is an educational Redis-inspired implementation and is not intended to replace production database systems.
+RedisLite is an educational implementation intended to demonstrate database concepts. It is not a replacement for Redis or a production database.
 
 Potential improvements include:
 
-- Move the expiry-cleaning logic completely into the `ExpiryCleaner` class
-- Improve persistence performance by avoiding a full database rewrite after every modification
-- Add more Redis-compatible commands such as `INCR`, `DECR`, `APPEND`, and `MGET`
-- Add support for Lists, Sets, and Hashes
-- Implement a client-server architecture using TCP sockets
-- Add connection handling for multiple clients
-- Improve concurrency control for persistence operations
-- Add more comprehensive unit and integration tests
-- Add configurable persistence and expiry-cleaner intervals
+- Reduce disk I/O by avoiding a complete database rewrite after every mutation.
+- Add commands such as `INCR`, `DECR`, `APPEND`, and `MGET`.
+- Support additional data structures, including lists, sets, and hashes.
+- Add a TCP client-server architecture to support multiple clients.
+- Improve persistence recovery and durability guarantees.
+- Strengthen concurrency handling and define behavior for multiple processes.
+- Add broader integration, failure-recovery, and concurrency tests.
+- Make persistence and expiration-cleaner intervals configurable.
+- Add benchmarking and performance measurements.
+- Improve command validation and error reporting.
 
-## Technologies Used
+## Learning Outcomes
 
-- **Java 21** — Core programming language
-- **Maven** — Project management and build automation
-- **JUnit 5** — Automated testing
-- **ConcurrentHashMap** — Thread-safe in-memory storage
-- **Java I/O / NIO** — File-based persistence
-- **IntelliJ IDEA** — Development environment
-- **Git** — Version control
+Building RedisLite provided hands-on experience with:
+
+- Designing an in-memory key-value data structure.
+- Using Java collections for concurrent access.
+- Implementing TTL-based expiration.
+- Coordinating a background cleanup thread.
+- Serializing data and restoring it from disk.
+- Handling persistence failures and temporary-file replacement.
+- Separating application responsibilities through layered design.
+- Writing automated tests with JUnit 5.
+- Using Maven and Git to build, test, and maintain a Java project.
 
 ## Author
 
 **Himagna Evuri**
 
-Computer Science & Engineering Student
+Computer Science and Engineering Student
 
-This project was developed as a hands-on implementation to understand the internal concepts behind in-memory key-value stores, TTL-based expiration, persistence, concurrency, and command processing.
+GitHub: [Himagna-Evuri](https://github.com/Him
